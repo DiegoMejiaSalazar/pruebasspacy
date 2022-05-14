@@ -1,0 +1,146 @@
+!pip install transformers
+!git lfs install
+
+
+
+
+from transformers import BertTokenizer, BertForMaskedLM
+import torch
+
+tokenizer = BertTokenizer.from_pretrained('dccuchile/bert-base-spanish-wwm-cased')
+model = BertForMaskedLM.from_pretrained('dccuchile/bert-base-spanish-wwm-cased')
+
+
+
+with open('training.txt', 'r') as fp:
+    text = fp.read().split('\n')
+    
+    
+with open('labels.txt', 'r') as lp:
+    text_labels = lp.read().split('\n')
+    
+    
+# Let's increase the vocabulary of Bert model and tokenizer
+new_tokens = ["aprehender", "deshecho"]
+num_added_toks = tokenizer.add_tokens(new_tokens)
+print('We have added', num_added_toks, 'tokens')# Notice: resize_token_embeddings expect to receive the full size of the new vocabulary, i.e., the length of the tokenizer.
+model.resize_token_embeddings(len(tokenizer))
+
+
+inputs = tokenizer(text, return_tensors='pt', max_length=512, truncation=True, padding='max_length')
+
+inputs.input_ids[0]
+
+inputs_labels = tokenizer(text_labels, return_tensors='pt', max_length=512, truncation=True, padding='max_length')
+
+inputs_labels.input_ids[0]
+
+inputs
+
+
+inputs['labels'] = inputs_labels.input_ids
+
+inputs.keys()
+
+
+rand = torch.rand(inputs.input_ids.shape)
+# create mask array
+
+mask_arr = (rand) * (inputs.input_ids != 4) * \
+           (inputs.input_ids != 5) * (inputs.input_ids == 0)
+           
+rand.shape
+
+mask_arr = mask_arr > 0
+mask_arr[1].nonzero()
+selection = []
+
+for i in range(inputs.input_ids.shape[0]):
+    selection.append(
+        torch.flatten(mask_arr[i].nonzero()).tolist()
+    )
+
+selection
+
+for i in range(inputs.input_ids.shape[0]):
+    inputs.input_ids[i, selection[i]] = 0
+
+inputs.input_ids[0]
+
+
+class MeditationsDataset(torch.utils.data.Dataset):
+    def __init__(self, encodings):
+        self.encodings = encodings
+    def __getitem__(self, idx):
+        return {key: torch.tensor(val[idx]) for key, val in self.encodings.items()}
+    def __len__(self):
+        return len(self.encodings.input_ids)
+        
+
+
+dataset = MeditationsDataset(inputs)
+
+loader = torch.utils.data.DataLoader(dataset, batch_size=16, shuffle=True)
+
+device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+# and move our model over to the selected device
+model.to(device)
+
+from transformers import AdamW
+
+# activate training mode
+model.train()
+# initialize optimizer
+optim = AdamW(model.parameters(), lr=5e-5)
+
+
+
+from tqdm import tqdm  # for our progress bar
+
+epochs = 100
+
+for epoch in range(epochs):
+    # setup loop with TQDM and dataloader
+    loop = tqdm(loader, leave=True)
+    for batch in loop:
+        # initialize calculated gradients (from prev step)
+        optim.zero_grad()
+        # pull all tensor batches required for training
+        input_ids = batch['input_ids'].to(device)
+        attention_mask = batch['attention_mask'].to(device)
+        labels = batch['labels'].to(device)
+        # process
+        outputs = model(input_ids, attention_mask=attention_mask,
+                        labels=labels)
+        # extract loss
+        loss = outputs.loss
+        # calculate loss for every parameter that needs grad update
+        loss.backward()
+        # update parameters
+        optim.step()
+        # print relevant info to progress bar
+        loop.set_description(f'Epoch {epoch}')
+        loop.set_postfix(loss=loss.item())
+
+
+from huggingface_hub import notebook_login
+# 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
+notebook_login()
+
+
+!git config --global user.email "doms1369@gmail.com"
+!git config --global user.name "Diego Mejia"
+
+
+%env PATH=/Users/doms/opt/anaconda3/bin:/Users/doms/opt/anaconda3/condabin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+
+!echo $PATH 
+
+!git init
+!git remote add "https://huggingface.co/Diegomejia/bert-ucb-v2"
+
+
+model.push_to_hub("Diegomejia/bert-ucb-v2")
+
+
+tokenizer.push_to_hub("Diegomejia/bert-ucb-v2")
